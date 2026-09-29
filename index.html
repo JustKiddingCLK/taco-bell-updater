@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Taco Bell List Updater</title>
+<style>
+  :root {
+    --bg: #f6f4f8; --card: #ffffff; --text: #1d1a22; --muted: #6b6474; --line: #e4e0ea;
+    --accent: #702082; --accent-text: #ffffff; --ok: #1f7a3f; --warn: #a15c00; --bad: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141218; --card: #1f1c25; --text: #ece8f1; --muted: #a39cad; --line: #332e3b;
+      --accent: #b06fd0; --accent-text: #141218; --ok: #6fd08f; --warn: #f0b35a; --bad: #f28b82;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  }
+  main { max-width: 560px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 4px 0 2px; }
+  .sub { color: var(--muted); margin: 0 0 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
+  .card h2 { font-size: 1.05rem; margin: 0 0 8px; }
+  .step { display: inline-block; width: 1.6em; height: 1.6em; border-radius: 50%; background: var(--accent);
+          color: var(--accent-text); text-align: center; font-size: .85rem; line-height: 1.6em; margin-right: 6px; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 10px; padding: 12px 16px; width: 100%;
+           background: var(--accent); color: var(--accent-text); cursor: pointer; }
+  button.secondary { background: transparent; color: var(--accent); border: 1.5px solid var(--accent); }
+  button:disabled { opacity: .45; cursor: default; }
+  select { font: inherit; width: 100%; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--line);
+           background: var(--bg); color: var(--text); }
+  label.check { display: flex; gap: 8px; align-items: center; margin-top: 10px; color: var(--muted); font-size: .95rem; }
+  .hint { color: var(--muted); font-size: .92rem; margin: 8px 0 0; }
+  .status { margin: 10px 0 0; font-weight: 600; }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .bad { color: var(--bad); }
+  .plan { margin: 10px 0 12px; font-size: .95rem; }
+  progress { width: 100%; height: 10px; margin-top: 10px; accent-color: var(--accent); }
+  ul.log { list-style: none; padding: 0; margin: 10px 0 0; font-size: .92rem; max-height: 260px; overflow-y: auto; }
+  ul.log li { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  details { margin-top: 10px; font-size: .92rem; }
+  details ul { padding-left: 18px; margin: 6px 0 0; color: var(--muted); }
+  .banner { background: var(--card); border: 1.5px solid var(--warn); border-radius: 14px; padding: 14px 16px; margin-bottom: 14px; }
+  footer { color: var(--muted); font-size: .8rem; text-align: center; margin-top: 18px; }
+  .row { display: flex; gap: 10px; margin-top: 12px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Taco Bell list updater</h1>
+  <p class="sub">Sends Taco Bell locations from OpenStreetMap to your Restaurant Tracker over Bluetooth.</p>
+
+  <div class="banner" id="noBluetooth" hidden>
+    <strong>This browser can't use Bluetooth.</strong><br>
+    On iPhone, open this page in the free <strong>Bluefy</strong> app (Safari doesn't support Web Bluetooth).
+  </div>
+
+  <section class="card">
+    <h2><span class="step">1</span>Connect</h2>
+    <p class="hint" style="margin-top:0">On the device, hold the button for 3 seconds until it says <em>Update mode</em>.</p>
+    <div style="margin-top:12px"><button id="connectBtn">Connect to device</button></div>
+    <p class="status" id="connStatus" hidden></p>
+    <details id="invBox" hidden>
+      <summary id="invSummary"></summary>
+      <ul id="invList"></ul>
+    </details>
+  </section>
+
+  <section class="card" id="chooseCard">
+    <h2><span class="step">2</span>Choose what to download</h2>
+    <select id="choice"></select>
+    <label class="check"><input type="checkbox" id="redownload"> Re-download places already on the device (gets newer data)</label>
+    <p class="plan" id="planText"></p>
+    <button id="sendBtn" disabled>Download and send</button>
+    <progress id="progress" max="1" value="0" hidden></progress>
+    <p class="status" id="runStatus" hidden></p>
+    <ul class="log" id="log"></ul>
+  </section>
+
+  <section class="card" id="finishCard" hidden>
+    <h2><span class="step">3</span>Finish</h2>
+    <p class="hint" style="margin-top:0">Send more places above, or finish: the device restarts and uses the new list.</p>
+    <div style="margin-top:12px"><button id="finishBtn">Finish and restart device</button></div>
+  </section>
+
+  <footer>Store locations © OpenStreetMap contributors, ODbL.</footer>
+</main>
+
+<script src="catalog.js"></script>
+<script src="core.js"></script>
+<script>
+'use strict';
+const SERVICE = '64623571-3a63-4699-9f2d-ef0ce84078ca';
+const CMD = '79d8a7ab-34de-446e-a4b3-e9cb7ef454de';
+const DATA = 'a4c811cb-e3dd-45df-b715-bc8c3d6f52b3';
+const CHUNK = 176;          // + 4-byte offset = 180 bytes, fits one packet at the iPhone's usual MTU (185)
+const BATCH = 8;            // regions per OpenStreetMap query
+const OVERPASS = 'https://overpass-api.de/api/interpreter';
+
+const $ = (id) => document.getElementById(id);
+const names = {};
+for (const r of [...CATALOG.states, ...CATALOG.countries]) names[r.code] = r.name;
+const nameOf = (code) => names[code] || code;
+
+let device = null, cmdChar = null, dataChar = null;
+let inventory = {};         // what the device has: { code: {count, fetched} }
+let replies = [], onReply = null, busy = false, sentSomething = false;
+
+// ---------- Page setup ----------
+
+if (!navigator.bluetooth) $('noBluetooth').hidden = false;
+
+(function fillChoices() {
+  const sel = $('choice');
+  const add = (parent, value, text) => { const o = document.createElement('option'); o.value = value; o.textContent = text; parent.appendChild(o); };
+  add(sel, 'WORLD', 'Worldwide');
+  add(sel, 'US', 'All of the US');
+  const states = document.createElement('optgroup'); states.label = 'US states';
+  CATALOG.states.forEach((s) => add(states, s.code, s.name));
+  const countries = document.createElement('optgroup'); countries.label = 'Countries';
+  CATALOG.countries.forEach((c) => add(countries, c.code, c.name));
+  sel.append(states, countries);
+  sel.value = 'US-MA';
+})();
+
+function currentPlan() {
+  return Core.plan($('choice').value, CATALOG, inventory, $('redownload').checked);
+}
+
+function showPlan() {
+  const { send, skip } = currentPlan();
+  const list = (codes) => codes.length <= 4 ? codes.map(nameOf).join(', ') : `${codes.slice(0, 3).map(nameOf).join(', ')} and ${codes.length - 3} more`;
+  let text;
+  if (send.length === 0) text = `Already on the device: ${list(skip)}. Nothing to send.`;
+  else {
+    text = `Will download ${send.length === 1 ? nameOf(send[0]) : send.length + ' places'}.`;
+    if (skip.length) text += ` Skipping ${skip.length} already on the device (${list(skip)}).`;
+  }
+  $('planText').textContent = text;
+  $('sendBtn').disabled = busy || !cmdChar || send.length === 0;
+}
+$('choice').addEventListener('change', showPlan);
+$('redownload').addEventListener('change', showPlan);
+showPlan();
+
+function setStatus(el, text, cls) {
+  el.hidden = !text;
+  el.textContent = text;
+  el.className = 'status ' + (cls || '');
+}
+
+function log(text, cls) {
+  const li = document.createElement('li');
+  li.textContent = text;
+  if (cls) li.className = cls;
+  $('log').prepend(li);
+}
+
+function showInventory() {
+  const codes = Object.keys(inventory).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+  const stores = codes.reduce((n, c) => n + inventory[c].count, 0);
+  $('invBox').hidden = false;
+  $('invSummary').textContent = codes.length
+    ? `On the device: ${codes.length} place${codes.length > 1 ? 's' : ''}, ${stores.toLocaleString()} stores`
+    : 'On the device: only its built-in list (nothing downloaded yet)';
+  $('invList').replaceChildren(...codes.map((c) => {
+    const li = document.createElement('li');
+    const date = inventory[c].fetched ? new Date(inventory[c].fetched * 1000).toLocaleDateString() : '';
+    li.textContent = `${nameOf(c)}: ${inventory[c].count} stores${date ? ', ' + date : ''}`;
+    return li;
+  }));
+}
+
+// ---------- Bluetooth ----------
+
+function write(characteristic, bytes) {
+  return characteristic.writeValueWithResponse ? characteristic.writeValueWithResponse(bytes) : characteristic.writeValue(bytes);
+}
+
+// Sends a text command and collects reply lines until `isLast(line)` is true.
+function command(text, isLast, timeoutMs = 20000) {
+  replies = [];
+  const got = [];
+  let timer;
+  const done = new Promise((resolve, reject) => {
+    timer = setTimeout(() => { onReply = null; reject(new Error(`The device didn't answer (${text.split(' ')[0]})`)); }, timeoutMs);
+    onReply = () => {
+      while (replies.length) {
+        const line = replies.shift();
+        got.push(line);
+        if (isLast(line)) { clearTimeout(timer); onReply = null; resolve(got); return; }
+      }
+    };
+  });
+  return write(cmdChar, new TextEncoder().encode(text)).then(() => done, (e) => {
+    clearTimeout(timer);
+    onReply = null;
+    throw e;
+  });
+}
+
+async function expectOk(text) {
+  const [line] = await command(text, (l) => l.startsWith('OK') || l.startsWith('ERR'));
+  if (line.startsWith('ERR')) throw new Error('Device: ' + line.slice(4));
+  return line;
+}
+
+async function connect() {
+  device = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE] }] });
+  device.addEventListener('gattserverdisconnected', () => {
+    cmdChar = dataChar = null;
+    setStatus($('connStatus'), 'Disconnected. Put the device in update mode and connect again.', 'warn');
+    $('connectBtn').disabled = false;
+    $('connectBtn').textContent = 'Connect again';
+    showPlan();
+  });
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(SERVICE);
+  cmdChar = await service.getCharacteristic(CMD);
+  dataChar = await service.getCharacteristic(DATA);
+  cmdChar.addEventListener('characteristicvaluechanged', (e) => {
+    replies.push(new TextDecoder().decode(e.target.value));
+    if (onReply) onReply();
+  });
+  await cmdChar.startNotifications();
+  const [info] = await command('INFO', (l) => l.startsWith('V'));
+  if (!info.startsWith('V1')) throw new Error('This page and the device firmware don\'t match. Update the firmware.');
+  inventory = Core.parseInventory(await command('LIST', (l) => l.startsWith('END')));
+  const freeKb = Math.round(+info.split(' ')[1] / 1024);
+  setStatus($('connStatus'), `Connected to ${device.name || 'Restaurant Tracker'} (${freeKb} KB free)`, 'ok');
+  showInventory();
+  $('connectBtn').textContent = 'Connected';
+  $('connectBtn').disabled = true;
+}
+
+async function sendRegion(code, bytes, onProgress) {
+  await expectOk(`BEGIN ${code} ${bytes.length} ${Core.crc32(bytes).toString(16)}`);
+  for (let off = 0; off < bytes.length; off += CHUNK) {
+    const n = Math.min(CHUNK, bytes.length - off);
+    const packet = new Uint8Array(4 + n);
+    new DataView(packet.buffer).setUint32(0, off, true);
+    packet.set(bytes.subarray(off, off + n), 4);
+    await write(dataChar, packet);
+    onProgress(off + n);
+  }
+  await expectOk('COMMIT');
+}
+
+// ---------- OpenStreetMap ----------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function overpass(query) {
+  for (let attempt = 1; ; attempt++) {
+    let res;
+    try {
+      res = await fetch(OVERPASS, { method: 'POST', body: new URLSearchParams({ data: query }) });
+    } catch (e) {
+      if (attempt >= 4) throw new Error('Can\'t reach OpenStreetMap. Check the internet connection.');
+      res = null;
+    }
+    if (res && res.ok) return res.json();
+    if (res && ![429, 502, 503, 504].includes(res.status)) throw new Error(`OpenStreetMap error ${res.status}`);
+    if (attempt >= 4) throw new Error('OpenStreetMap is busy. Try again in a few minutes.');
+    setStatus($('runStatus'), `OpenStreetMap is busy, retrying in ${15 * attempt} s...`, 'warn');
+    await sleep(15000 * attempt);
+  }
+}
+
+// ---------- Main ----------
+
+async function run() {
+  const { send } = currentPlan();
+  busy = true;
+  showPlan();
+  $('progress').hidden = false;
+  $('progress').value = 0;
+  let done = 0, stores = 0, missing = 0;
+  const batches = [];
+  for (let i = 0; i < send.length; i += BATCH) batches.push(send.slice(i, i + BATCH));
+  try {
+    for (let b = 0; b < batches.length; b++) {
+      const batch = batches[b];
+      setStatus($('runStatus'), batches.length > 1
+        ? `Downloading from OpenStreetMap (part ${b + 1} of ${batches.length})...`
+        : 'Downloading from OpenStreetMap...');
+      const regions = Core.splitRegions(await overpass(Core.overpassQuery(batch)), batch);
+      const fetched = Math.floor(Date.now() / 1000);
+      for (const code of batch) {
+        if (!(code in regions)) {
+          log(`${nameOf(code)}: not found on OpenStreetMap, skipped`, 'warn');
+          missing++;
+        } else {
+          const bytes = Core.buildRegionFile(code, regions[code], fetched);
+          setStatus($('runStatus'), `Sending ${nameOf(code)} (${done + 1} of ${send.length})...`);
+          await sendRegion(code, bytes, (sent) => { $('progress').value = (done + sent / bytes.length) / send.length; });
+          inventory[code] = { count: regions[code].length, fetched };
+          stores += regions[code].length;
+          sentSomething = true;
+          log(`${nameOf(code)}: ${regions[code].length} stores ✓`, 'ok');
+        }
+        done++;
+        $('progress').value = done / send.length;
+      }
+    }
+    setStatus($('runStatus'), `Done: ${stores.toLocaleString()} stores in ${done - missing} place${done - missing === 1 ? '' : 's'} sent.` +
+      (missing ? ` ${missing} not found.` : ''), 'ok');
+  } catch (e) {
+    const lost = !cmdChar;
+    setStatus($('runStatus'), (lost ? 'Connection lost. ' : '') + e.message +
+      ' Places already sent are kept; connect and press Download again to continue.', 'bad');
+  } finally {
+    busy = false;
+    showInventory();
+    showPlan();
+    $('finishCard').hidden = !sentSomething;
+  }
+}
+
+$('connectBtn').addEventListener('click', async () => {
+  $('connectBtn').disabled = true;
+  setStatus($('connStatus'), 'Connecting...');
+  try {
+    await connect();
+  } catch (e) {
+    $('connectBtn').disabled = false;
+    setStatus($('connStatus'), e.name === 'NotFoundError' ? 'No device chosen. Is it in update mode?' : e.message, 'bad');
+  }
+  showPlan();
+});
+
+$('sendBtn').addEventListener('click', run);
+
+$('finishBtn').addEventListener('click', async () => {
+  $('finishBtn').disabled = true;
+  try {
+    await expectOk('DONE');
+    setStatus($('runStatus'), 'The device is restarting with the new list. You can close this page.', 'ok');
+  } catch (e) {
+    setStatus($('runStatus'), e.message, 'bad');
+    $('finishBtn').disabled = false;
+  }
+});
+</script>
+</body>
+</html>
