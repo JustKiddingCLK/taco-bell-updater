@@ -22,8 +22,7 @@
     padding: max(16px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
   }
   main { max-width: 560px; margin: 0 auto; }
-  h1 { font-size: 1.4rem; margin: 4px 0 2px; }
-  .sub { color: var(--muted); margin: 0 0 16px; }
+  h1 { font-size: 1.4rem; margin: 4px 0 16px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin-bottom: 14px; }
   .card h2 { font-size: 1.05rem; margin: 0 0 8px; }
   .step { display: inline-block; width: 1.6em; height: 1.6em; border-radius: 50%; background: var(--accent);
@@ -53,7 +52,6 @@
 <body>
 <main>
   <h1>Taco Bell list updater</h1>
-  <p class="sub">Sends Taco Bell locations from OpenStreetMap to your Restaurant Tracker over Bluetooth.</p>
 
   <div class="banner" id="noBluetooth" hidden>
     <strong>This browser can't use Bluetooth.</strong><br>
